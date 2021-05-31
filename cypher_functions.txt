@@ -1,0 +1,214 @@
+//
+// Autor anonimizado
+// 
+// Funções testadas na versão 4.2.6 do Neo4J
+//
+//
+
+
+//Retorna o primeiro filho de um nó.
+CALL apoc.custom.asFunction(
+  'getFirstChild',
+  'WITH $no AS pai, $config AS config
+     MATCH (pai)<-[r1]-(filho) 
+       WHERE config.relParent = TYPE(r1)
+     OPTIONAL MATCH (filho)<-[r2]-() 
+       WHERE config.relSibling = TYPE(r2) 
+   WITH filho, r2 WHERE (r2 IS NULL)
+   RETURN filho AS child LIMIT 1
+   UNION RETURN null AS child LIMIT 1
+  ',
+ 'NODE',
+  [['no','NODE'], ['config','MAP','{
+    tipoTag:"XmlTag",
+    tipoText:"XmlCharacters",
+    tipoDocument:"XmlDocument",
+    tipoPI:"XmlPI",
+    tipoComment:"XmlComment",
+    relParent:"IS_CHILD_OF",
+    relSibling:"NEXT_SIBLING",
+    relNext:"NEXT"}']],
+  false, //forceSingle
+  'Retorna o primeiro filho de um nó.'
+); 
+
+
+//Retorna o último filho de um nó.
+CALL apoc.custom.asFunction(
+  'getLastChild',
+  'WITH $no AS pai, $config AS config
+     MATCH (pai)<-[r1]-(filho) 
+       WHERE config.relParent = TYPE(r1)
+     OPTIONAL MATCH (filho)-[r2]->() 
+       WHERE config.relSibling = TYPE(r2) 
+   WITH filho, r2 WHERE (r2 IS NULL)
+   RETURN filho AS child LIMIT 1
+   UNION RETURN null AS child LIMIT 1
+  ',
+ 'NODE',
+  [['no','NODE'], ['config','MAP','{
+    tipoTag:"XmlTag",
+    tipoText:"XmlCharacters",
+    tipoDocument:"XmlDocument",
+    tipoPI:"XmlPI",
+    tipoComment:"XmlComment",
+    relParent:"IS_CHILD_OF",
+    relSibling:"NEXT_SIBLING",
+    relNext:"NEXT"}']],
+  false, //forceSingle
+  'Retorna o último filho de um nó.'
+);
+
+
+//Retorna a quantidade de filhos de filho de um nó.
+CALL apoc.custom.asFunction(
+  'getChildCounter',
+  'WITH $no AS pai, $config AS config
+     MATCH (pai)<-[r1]-(filho) 
+       WHERE config.relParent = TYPE(r1) 
+   WITH COUNT(filho) AS contador LIMIT 1
+   RETURN contador
+   UNION RETURN 0 AS contador LIMIT 1
+  ',
+  '(LONG)',
+  [['no','NODE'], ['config','MAP','{
+    tipoTag:"XmlTag",
+    tipoText:"XmlCharacters",
+    tipoDocument:"XmlDocument",
+    tipoPI:"XmlPI",
+    tipoComment:"XmlComment",
+    relParent:"IS_CHILD_OF",
+    relSibling:"NEXT_SIBLING",
+    relNext:"NEXT"}']],
+  true, //forceSingle
+  'Retorna a quantidade de filhos de filho de um nó.'
+);
+
+
+// Retorna um array contendo o filho do nó.
+CALL apoc.custom.asFunction(
+  'getChildListForOne',
+  'WITH $no AS pai, $config AS config
+     MATCH (filho)-[r1]->(pai)
+       WHERE config.relParent = TYPE(r1)
+     OPTIONAL MATCH (filho)-[r2]-() 
+       WHERE config.relSibling = TYPE(r2) 
+   WITH filho, r2 WHERE (r2 IS NULL)
+   RETURN [filho] AS childs LIMIT 1
+   UNION RETURN [] AS childs LIMIT 1',
+  '(LIST OF (NODE))',
+  [['no','NODE'], ['config','MAP','{
+    tipoTag:"XmlTag",
+    tipoText:"XmlCharacters",
+    tipoDocument:"XmlDocument",
+    tipoPI:"XmlPI",
+    tipoComment:"XmlComment",
+    relParent:"IS_CHILD_OF",
+    relSibling:"NEXT_SIBLING",
+    relNext:"NEXT"}']],
+  true, //forceSingle
+  'Retorna um array contendo o filho do nó.'
+);
+
+
+//dijkstra para caminho mais curto, peso/custo igual
+CALL apoc.custom.asFunction(
+  'getSingleShortestPath',
+  'WITH $no1 AS no1, $no2 AS no2, $config AS config
+   CALL apoc.algo.dijkstra(no1, no2, config.relSibling, "")
+     YIELD path RETURN NODES(path) AS childs LIMIT 1
+   UNION RETURN [] AS childs LIMIT 1',
+  '(LIST OF NODE)',
+  [['no1','NODE'],['no2','NODE'], ['config','MAP','{
+    tipoTag:"XmlTag",
+    tipoText:"XmlCharacters",
+    tipoDocument:"XmlDocument",
+    tipoPI:"XmlPI",
+    tipoComment:"XmlComment",
+    relParent:"IS_CHILD_OF",
+    relSibling:"NEXT_SIBLING",
+    relNext:"NEXT"}']],
+  true, //forceSingle
+  'Retorna um array de nós do caminho entre filhos de um mesmo nó pai.'
+);
+
+
+//Pega todos os filhos em array já ordenado
+CALL apoc.custom.asFunction(
+  'getChildListForAllSiblings',
+  'WITH $no AS pai, $config AS config
+   WITH pai, config,
+     custom.getFirstChild(pai, config).child as n1,
+     custom.getLastChild(pai, config).child as n2
+   WITH n1, n2, config,
+     CASE 
+       WHEN (n1 IS null OR n2 IS null) THEN []
+       ELSE custom.getSingleShortestPath(n1, n2, config)
+     END AS childs
+   RETURN childs',
+  '(LIST OF NODE)',
+  [['no','NODE'], ['config','MAP','{
+    tipoTag:"XmlTag",
+    tipoText:"XmlCharacters",
+    tipoDocument:"XmlDocument",
+    tipoPI:"XmlPI",
+    tipoComment:"XmlComment",
+    relParent:"IS_CHILD_OF",
+    relSibling:"NEXT_SIBLING",
+    relNext:"NEXT"}']],
+  true, //forceSingle
+  'Retorna um array ordenado. Ideal para nós com mais de um filho.'
+);
+
+
+// Pega todos os filhos ordenados mas faz combinação de acordo com a melhor função (escolha case) 
+CALL apoc.custom.asFunction(
+  'getOrderedChilds',
+    'WITH $no AS pai, $config AS config
+     WITH pai, config,
+     CASE custom.getChildCounter(pai, config)
+       WHEN 0 THEN []
+       WHEN 1 THEN custom.getChildListForOne(pai, config)
+       ELSE custom.getChildListForAllSiblings(pai, config)
+     END AS childs
+   RETURN childs',
+  '(LIST OF NODE)',
+  [['no','NODE'], ['config','MAP','{
+    tipoTag:"XmlTag",
+    tipoText:"XmlCharacters",
+    tipoDocument:"XmlDocument",
+    tipoPI:"XmlPI",
+    tipoComment:"XmlComment",
+    relParent:"IS_CHILD_OF",
+    relSibling:"NEXT_SIBLING",
+    relNext:"NEXT"}']],
+  true, //forceSingle
+  'Retorna um array ordenado. 
+   Considera melhor opção para
+   otimizar montagem de resultado.'
+);
+
+
+
+//TESTANDO FUNÇÕES E SUBFUNÇÕES
+//  para cada nó vai trazer qtdFilhos, primeiroFilho, 
+//  ultimoFilho, e array com todos seus filhos imediatos.
+//  dataset precisa estar no modelo adequado
+MATCH (n)
+WITH n, custom.getChildCounter(n) AS qtd
+WITH n, qtd,
+  CASE qtd
+    WHEN 0 THEN null
+    ELSE custom.getFirstChild(n).child
+  END AS no1,
+  CASE qtd
+    WHEN 0 THEN null
+    ELSE custom.getLastChild(n).child
+  END AS no2
+RETURN 
+  n AS noXML,
+  qtd AS qtdFilhos,
+  no1 AS primeiroFilho,
+  no2 AS ultimoFilho,
+  custom.getOrderedChilds(n) AS filhosOrdenados
+;
